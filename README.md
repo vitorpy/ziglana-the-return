@@ -8,6 +8,7 @@ A minimal template for building Solana BPF programs using standard Zig compiler 
 - ✅ Zero external dependencies (no SDK needed)
 - ✅ LLVM bitcode generation via `-femit-llvm-bc`
 - ✅ Direct syscall invocation via function pointers
+- ✅ Auto-generated syscall bindings with MurmurHash3
 - ✅ Automated build pipeline with `zig build`
 - ✅ Jest-based integration tests with solana-test-validator
 
@@ -47,16 +48,22 @@ Tests will:
 
 ## How It Works
 
-### 1. Direct Syscalls via Function Pointers
+### 1. Auto-Generated Syscall Bindings
 
-Instead of using extern declarations (which get optimized away), we call Solana syscalls directly:
+All Solana syscalls are auto-generated from definitions using MurmurHash3-32:
 
-```zig
-const sol_log_ = @as(*align(1) const fn ([*]const u8, u64) void, @ptrFromInt(0x207559bd));
-sol_log_(message.ptr, message.len);
+```bash
+zig run tools/gen_syscalls.zig -- src/syscalls.zig
 ```
 
-The magic constant `0x207559bd` is the syscall hash that Solana VM resolves at runtime.
+This creates function pointers for all syscalls:
+
+```zig
+const syscalls = @import("syscalls.zig");
+syscalls.log(&message);  // Calls sol_log_ with hash 0x207559bd
+```
+
+The hash `0x207559bd` is computed as `murmur3_32("sol_log_", 0)` and resolved by Solana VM at runtime via `call -0x1`.
 
 ### 2. Inline String Data
 
@@ -79,12 +86,17 @@ sbpf-linker --cpu v3 --export entrypoint -o program.so entrypoint.bc
 
 ```
 .
-├── build.zig           # Automated build pipeline
-├── build.zig.zon       # Zero dependencies
+├── build.zig              # Automated build pipeline
+├── build.zig.zon          # Zero dependencies
 ├── src/
-│   └── entrypoint.zig  # Program entrypoint with inline syscalls
+│   ├── entrypoint.zig     # Program entrypoint
+│   └── syscalls.zig       # Auto-generated syscall bindings
+├── tools/
+│   ├── murmur3.zig        # MurmurHash3-32 implementation
+│   ├── syscall_defs.zig   # Syscall definitions
+│   └── gen_syscalls.zig   # Syscall generator
 └── test/
-    └── program.test.ts # Integration tests
+    └── program.test.ts    # Integration tests
 ```
 
 ## License
